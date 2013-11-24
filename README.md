@@ -13,6 +13,9 @@ docker run -d -v <absolute_path_for_local_gists>:/var/lib/tomcat7/webapps/ROOT/g
 ```
   The above command maps a local path `<absolute_path_for_local_gists>` to a in-container location and connects local port 8080 to the in-container equivalent.
 
-* point your browser to http://localhost:8080, you should see the graphgist webpage
-* to use graphgists locally create a file ending with `.adoc` in the folder `<absolute_path_for_local_gists>` from above and type the filename with the `.adoc` extension in the upper right corner.
+* point your browser to [http://localhost:8080](http://localhost:8080), you should see the graphgist webpage
+* to use graphgists locally create a file ending with `.adoc` in the folder `<absolute_path_for_lcal_gists>` from above 
+* to render your graphgist files, there are two options:
+    1. type the filename exlcuding the `.adoc` extension in the upper right corner of [http://localhost:8080](http://localhost:8080)
+    2. call [http://localhost:8080?myfile_without_adoc](http://localhost:8080?myfile_without_adoc) 
 * for some examples see the contents of the `gists` folder in this repo
