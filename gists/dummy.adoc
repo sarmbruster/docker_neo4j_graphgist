@@ -1,0 +1,317 @@
+= Why JIRA should use Neo4j
+
+== Introduction
+
+There are few developers in the world that have never used an issue tracker. But there are even fewer developers who have ever used an issue tracker which uses a graph database. This is a shame because issue tracking really maps much better onto a graph database, than it does onto a relational database. Proof of that is the https://developer.atlassian.com/download/attachments/4227160/JIRA61_db_schema.pdf?api=v2[JIRA database schema].
+
+Now obviously, the example below does not have all of the features that a tool like JIRA provides. But it is only a proof of concept, you could map every feature of JIRA into a Neo4J database. What I've done below, is take out some of the core functionalities and implement those. 
+
+== The data set
+
+image::http://i1303.photobucket.com/albums/ag146/vanaepi/domain_zps1e9c28ba.png[]
+
+As you can see, the entire domain is centered around the issues, hence the name issue tracker. Some of the nodes contain constants (for instance priority or type) and can be reused in every project, but they could also be remade for every project since you'll hardly ever want to search outside of your project.
+
+//hide
+[source,cypher]
+----
+CREATE
+
+(emil:USER {name: 'Emil Eifrem'}),
+(peter:USER {name: 'Peter Neubauer'}),
+(michael:USER {name: 'Michael Hunger'}),
+
+(open:STATUS {value: 'Open'}),
+(inprogress:STATUS {value: 'In Progress'}),
+(reopened:STATUS {value: 'Reopened'}),
+(resolved:STATUS {value: 'Resolved'}),
+(closed:STATUS {value: 'Closed'}),
+(waiting:STATUS {value: 'Waiting'}),
+
+(bug:TYPE {value: 'Bug'}),
+(task:TYPE {value: 'Task'}),
+(subtask:TYPE {value: 'Sub-task'}),
+(improvement:TYPE {value: 'Improvement'}),
+(newfeature:TYPE {value: 'New Feature'}),
+
+(cypher_tag:TAG {value: 'Cypher'}),
+
+(issue_1:ISSUE:CURRENT {id: 'issue_1', summary: 'This is a first issue', description: 'Yes, this is definitely a first issue and it has a description.'}),
+(issue_2:ISSUE:CURRENT {id: 'issue_2', summary: 'This is a second issue', description: 'Yes, this is definitely a second issue and it has a description.'}),
+
+(issue_1_old:ISSUE:HISTORICAL {id: 'issue_1', summary: 'This used to be a first issue', description: 'Yes, it was until it was changed'}),
+
+(issue_3:ISSUE:CURRENT {id: 'issue_3', summary: 'This is a subtask', description: 'Yes, it is a subtask indeed.'}),
+
+(neo4j:PROJECT {id: 'NEO4J', name: 'Neo4j Graph Database'}),
+
+(sprint1:SPRINT {id: 'sprint_1', name: 'Initial sprint'}),
+(sprint2:SPRINT {id: 'sprint_2', name: 'Second sprint'}),
+
+(cyphercomponent:COMPONENT {id: 'cypher', name: 'Cypher Component'}),
+(graphvizcomponent:COMPONENT {id: 'graphviz', name: 'Graphviz Component'}),
+
+(trivial:PRIORITY {value: 'trivial'}),
+(minor:PRIORITY {value: 'minor'}),
+(major:PRIORITY {value: 'major'}),
+(critical:PRIORITY {value: 'critical'}),
+(blocker:PRIORITY {value: 'blocker'}),
+
+(comment:COMMENT {id: 'comment_1', title: 'Comment Title', content: 'Comment content'}),
+
+(update:ACTION {type: 'update'}),
+
+
+issue_1-[:REPORTED_BY]->emil,
+issue_1-[:ASSIGNED_TO]->michael,
+issue_2-[:REPORTED_BY]->peter,
+issue_2-[:ASSIGNED_TO]->peter,
+
+issue_1-[:HAS_COMMENT]->comment,
+comment-[:COMMENT_BY]->michael,
+
+update-[:PERFORMED_BY]->michael,
+update-[:OLD_VERSION]->issue_1_old,
+update-[:NEW_VERSION]->issue_1,
+
+issue_1-[:OF_TYPE]->bug,
+issue_2-[:OF_TYPE]->task,
+issue_1_old-[:OF_TYPE]->bug,
+issue_3-[:OF_TYPE]->subtask,
+
+issue_2-[:HAS_SUBTASK]->issue_3,
+
+issue_1-[:HAS_PRIORITY]->major,
+issue_2-[:HAS_PRIORITY]->critical,
+issue_3-[:HAS_PRIORITY]->blocker,
+issue_1_old-[:HAS_PRIORITY]->major,
+
+issue_1-[:HAS_STATUS]->open,
+issue_2-[:HAS_STATUS]->reopened,
+issue_3-[:HAS_STATUS]->resolved,
+
+issue_2-[:HAS_TAG]->cypher_tag,
+issue_3-[:HAS_TAG]->cypher_tag,
+
+issue_2-[:CONCERNS_COMPONENT]->cyphercomponent,
+issue_3-[:CONCERNS_COMPONENT]->cyphercomponent,
+issue_1-[:CONCERNS_COMPONENT]->graphvizcomponent,
+
+neo4j-[:HAS_ISSUE]->issue_1,
+neo4j-[:HAS_ISSUE]->issue_2,
+neo4j-[:HAS_ISSUE]->issue_3,
+neo4j-[:HAS_ISSUE]->issue_1_old,
+
+sprint1-[:CONTAINS_ISSUE]->issue_1,
+sprint1-[:CONTAINS_ISSUE]->issue_3,
+sprint2-[:CONTAINS_ISSUE]->issue_2,
+
+neo4j-[:HAS_SPRINT]->sprint1,
+neo4j-[:HAS_SPRINT]->sprint2,
+
+neo4j-[:HAS_COMPONENT]->cyphercomponent,
+neo4j-[:HAS_COMPONENT]->graphvizcomponent;
+----
+
+//graph
+
+
+== Use Cases
+
+=== Get all current issues
+
+//output
+[source,cypher]
+----
+MATCH issue:ISSUE:CURRENT
+RETURN issue.id, issue.summary, issue.description
+----
+
+=== Get all current open issues
+
+//output
+[source,cypher]
+----
+MATCH issue:ISSUE:CURRENT-[:HAS_STATUS]->status:STATUS
+WHERE status.value='Open'
+RETURN issue.id, issue.summary, issue.description
+----
+
+=== Get all current open issues assigned to Michael
+
+//output
+[source,cypher]
+----
+MATCH user<-[:ASSIGNED_TO]-issue:ISSUE:CURRENT-[:HAS_STATUS]->status:STATUS
+WHERE user.name='Michael Hunger' AND status.value='Open'
+RETURN issue.id, issue.summary, issue.description
+----
+
+=== Get all current open issues assigned to Michael in sprint 1
+
+//output
+[source,cypher]
+----
+MATCH user<-[:ASSIGNED_TO]-issue:ISSUE:CURRENT-[:HAS_STATUS]->status:STATUS,
+issue<-[:CONTAINS_ISSUE]-sprint:SPRINT
+WHERE user.name='Michael Hunger' AND status.value='Open' AND sprint.id='sprint_1'
+RETURN issue.id, issue.summary, issue.description
+----
+
+=== Get all current issues assigned to and reported by the same person
+
+//output
+[source,cypher]
+----
+MATCH user<-[:ASSIGNED_TO]-issue:ISSUE:CURRENT-[:REPORTED_BY]->user
+RETURN issue.id, issue.summary, user.name
+----
+
+=== Get the history for an issue
+
+//output
+[source,cypher]
+----
+MATCH issue:ISSUE-[:NEW_VERSION]-action:ACTION-[OLD_VERSION]-issueold:ISSUE:HISTORICAL
+RETURN issueold.summary, issueold.description
+----
+
+
+=== Get the blocking priority issues
+
+//output
+[source,cypher]
+----
+MATCH issue:ISSUE:CURRENT-[:HAS_PRIORITY]->priority:PRIORITY
+WHERE priority.value='blocker'
+RETURN issue.id, issue.summary
+----
+
+=== Get the comments on an issue
+
+//output
+[source,cypher]
+----
+MATCH issue:ISSUE-[:HAS_COMMENT]->comment:COMMENT-[:COMMENT_BY]->user:USER
+WHERE issue.id='issue_1'
+RETURN comment.title, comment.content, user.name
+----
+
+=== Other queries
+
+In a similar fashion like the queries above, you can search based on priority, labels, type, status, ... or combine several of them into one search query. In this fashion, you can perform any search that JIRA also provides. You can improve the performance by creating schema indices on the properties you're looking up in the WHERE clause. 
+
+== Play around with it in the console
+
+//console
+//hide
+//setup
+[source,cypher]
+----
+CREATE
+
+(emil:USER {name: 'Emil Eifrem'}),
+(peter:USER {name: 'Peter Neubauer'}),
+(michael:USER {name: 'Michael Hunger'}),
+
+(open:STATUS {value: 'Open'}),
+(inprogress:STATUS {value: 'In Progress'}),
+(reopened:STATUS {value: 'Reopened'}),
+(resolved:STATUS {value: 'Resolved'}),
+(closed:STATUS {value: 'Closed'}),
+(waiting:STATUS {value: 'Waiting'}),
+
+(bug:TYPE {value: 'Bug'}),
+(task:TYPE {value: 'Task'}),
+(subtask:TYPE {value: 'Sub-task'}),
+(improvement:TYPE {value: 'Improvement'}),
+(newfeature:TYPE {value: 'New Feature'}),
+
+(cypher_tag:TAG {value: 'Cypher'}),
+
+(issue_1:ISSUE:CURRENT {id: 'issue_1', summary: 'This is a first issue', description: 'Yes, this is definitely a first issue and it has a description.'}),
+(issue_2:ISSUE:CURRENT {id: 'issue_2', summary: 'This is a second issue', description: 'Yes, this is definitely a second issue and it has a description.'}),
+
+(issue_1_old:ISSUE:HISTORICAL {id: 'issue_1', summary: 'This used to be a first issue', description: 'Yes, it was until it was changed'}),
+
+(issue_3:ISSUE:CURRENT {id: 'issue_3', summary: 'This is a subtask', description: 'Yes, it is a subtask indeed.'}),
+
+(neo4j:PROJECT {id: 'NEO4J', name: 'Neo4j Graph Database'}),
+
+(sprint1:SPRINT {id: 'sprint_1', name: 'Initial sprint'}),
+(sprint2:SPRINT {id: 'sprint_2', name: 'Second sprint'}),
+
+(cyphercomponent:COMPONENT {id: 'cypher', name: 'Cypher Component'}),
+(graphvizcomponent:COMPONENT {id: 'graphviz', name: 'Graphviz Component'}),
+
+(trivial:PRIORITY {value: 'trivial'}),
+(minor:PRIORITY {value: 'minor'}),
+(major:PRIORITY {value: 'major'}),
+(critical:PRIORITY {value: 'critical'}),
+(blocker:PRIORITY {value: 'blocker'}),
+
+(comment:COMMENT {id: 'comment_1', title: 'Comment Title', content: 'Comment content'}),
+
+(update:ACTION {type: 'update'}),
+
+
+issue_1-[:REPORTED_BY]->emil,
+issue_1-[:ASSIGNED_TO]->michael,
+issue_2-[:REPORTED_BY]->peter,
+issue_2-[:ASSIGNED_TO]->peter,
+
+issue_1-[:HAS_COMMENT]->comment,
+comment-[:COMMENT_BY]->michael,
+
+update-[:PERFORMED_BY]->michael,
+update-[:OLD_VERSION]->issue_1_old,
+update-[:NEW_VERSION]->issue_1,
+
+issue_1-[:OF_TYPE]->bug,
+issue_2-[:OF_TYPE]->task,
+issue_1_old-[:OF_TYPE]->bug,
+issue_3-[:OF_TYPE]->subtask,
+
+issue_2-[:HAS_SUBTASK]->issue_3,
+
+issue_1-[:HAS_PRIORITY]->major,
+issue_2-[:HAS_PRIORITY]->critical,
+issue_3-[:HAS_PRIORITY]->blocker,
+issue_1_old-[:HAS_PRIORITY]->major,
+
+
+issue_2-[:HAS_TAG]->cypher_tag,
+issue_3-[:HAS_TAG]->cypher_tag,
+
+issue_2-[:CONCERNS_COMPONENT]->cyphercomponent,
+issue_3-[:CONCERNS_COMPONENT]->cyphercomponent,
+issue_1-[:CONCERNS_COMPONENT]->graphvizcomponent,
+
+neo4j-[:HAS_ISSUE]->issue_1,
+neo4j-[:HAS_ISSUE]->issue_2,
+neo4j-[:HAS_ISSUE]->issue_3,
+neo4j-[:HAS_ISSUE]->issue_1_old,
+
+issue_1-[:HAS_STATUS]->open,
+issue_2-[:HAS_STATUS]->reopened,
+issue_3-[:HAS_STATUS]->resolved,
+
+sprint1-[:CONTAINS_ISSUE]->issue_1,
+sprint1-[:CONTAINS_ISSUE]->issue_3,
+sprint2-[:CONTAINS_ISSUE]->issue_2,
+
+neo4j-[:HAS_SPRINT]->sprint1,
+neo4j-[:HAS_SPRINT]->sprint2,
+
+neo4j-[:HAS_COMPONENT]->cyphercomponent,
+neo4j-[:HAS_COMPONENT]->graphvizcomponent;
+----
+
+== What about time management?
+
+There are several components that need to be managed in time. Issues can have due dates, comments have posting dates, user actions have a timestamp, etc. There are two main ways I could imagine htis get implemented. The first one is my least favourite one. You could add UNIX timestamps as properties. But that isn't the most graph friendly approach.
+
+The second option is the one that I'd prefer. You add 12 nodes, one of for each month, 31 nodes, one for each day, 24 nodes, one for each hour, 60 nodes, one for each minute, and depending on the timespan your working in, you can add X nodes for the years you want to cover. You can then connect those nodes with logical :NEXT relationships, for instance between the first and second month node. 
+
+Then you add relationships from the node that needs to be managed in time, to the day node, month node, year node, ... and in that way, you have generated a graph timestamp. The concept is also described http://blog.neo4j.org/2012/02/modeling-multilevel-index-in-neoj4.html[here] but the relationships between year and month, month and day, etc. would not be necessary as they add nothing valuable in this particular scenario.
+
